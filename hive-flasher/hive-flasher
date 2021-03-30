@@ -26,9 +26,9 @@ echo -e "${PURPLE}$ip${NOCOLOR}"
 echo
 
 echo -e "${YELLOW}
-======================================
-=== Hive OS Drive Flashing Utility ===
-======================================
+===================================
+====== Flashing Utility v0.2 ======
+===================================
 ${NOCOLOR}
 "
 
@@ -41,10 +41,10 @@ function install () {
     #imgfile=`realpath hive.img`
 
 
-    imgfile=`find /mnt/hive-install -name "hive*.img" | head -n 1`
+    imgfile=`find /mnt/hive-install -name "*@*.img" | head -n 1`
 
     [[ -z $imgfile ]] &&
-        echo -e "${RED}hive image not found, place it on disk please${NOCOLOR}" &&
+        echo -e "${RED}Image not found, place it on disk please${NOCOLOR}" &&
         return 1
 
     [[ ! -e $imgfile ]] &&
@@ -52,13 +52,13 @@ function install () {
         return 1
 
 
-    echo -e "Found Hive image: ${GREEN}`basename $imgfile`${NOCOLOR}";
+    echo -e "Found image: ${GREEN}`basename $imgfile`${NOCOLOR}";
 
 
 
     bootpart=`readlink -f /dev/block/$(mountpoint -d /)`
-    bootdisk=${bootpart::-1} #cutoff partnumber
-    echo "Booted from $bootpart partition"
+    [[ "$bootpart" =~ nvme ]] && bootdisk=${bootpart::-2} || bootdisk=${bootpart::-1}
+    echo "Booted from $bootdisk"
 
 
     #Disk /dev/sdb: 111.8 GiB, 120034123776 bytes, 234441648 sectors
@@ -67,7 +67,7 @@ function install () {
         echo -e "${RED}No other disk found${NOCOLOR}" &&
         return 1
 
-    otherdisk=${otherdisk::-1} #cutoff :
+    [[ "$otherdisk" =~ nvme ]] && otherdisk=${otherdisk::-2} || otherdisk=${otherdisk::-1}
 
     [[ -z $otherdisk ]] &&
         fdisk -l | grep 'Disk /dev/' &&
@@ -171,7 +171,7 @@ function install () {
 			while true; do
 				read -p "Enter new RIG_ID: " RIG_ID
 				typeset -i RIG_ID="$RIG_ID"
-				if [[ $RIG_ID > 0 ]]; then
+				if [[ $RIG_ID -gt 0 ]]; then
 					echo -e "New RIG_ID=${GREEN}$RIG_ID${NOCOLOR}"
 					FARM_HASH=
 					rig_conf=$(sed "s/^FARM_HASH=.*\$/FARM_HASH=/g" <<< "$rig_conf")
@@ -240,9 +240,12 @@ function install () {
     ddcmd="dd if=$imgfile of=$otherdisk bs=10M status=progress"
     echo -e "${CYAN}$ddcmd${NOCOLOR}"
     eval "$ddcmd"
-    [[ $? > 0 ]] && echo -e "${RED}Error writing image${NOCOLOR}" && return 1
+    [[ $? -ne 0 ]] && echo -e "${RED}Error writing image${NOCOLOR}" && return 1
     sync
 
+    sgdisk -e $otherdisk > /dev/null 2>&1
+    sgdisk -C $otherdisk > /dev/null 2>&1
+    partprobe $otherdisk > /dev/null 2>&1
 
 
 	# Writing files to new partition --------------------------------------------------------------
@@ -250,10 +253,9 @@ function install () {
     echo
 
 
-    partprobe
-
-    mount -t ntfs-3g ${otherdisk}1 /mnt/hive-config
-    [[ $? > 0 ]] && echo -e "${RED}Unable to mount ${otherdisk1}${NOCOLOR}" && return 1
+    [[ "$otherdisk" =~ nvme ]] && otherdisk=${otherdisk}p1 || otherdisk=${otherdisk}1
+    mount -t ntfs-3g ${otherdisk} /mnt/hive-config
+    [[ $? -ne 0 ]] && echo -e "${RED}Unable to mount ${otherdisk}${NOCOLOR}" && return 1
 
     # Update config partition with predefined configs
     [[ -d /mnt/hive-install/hive-config.stub ]] &&
